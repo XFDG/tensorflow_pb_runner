@@ -1,9 +1,48 @@
 import tensorflow as tf
 import numpy as np
+import os
 from tensorflow.core.framework import graph_pb2
 
 model_path = "graph_def.pb"
 batch_size = 100
+
+
+def configure_musa_runtime():
+    """
+    Load libmusa_plugin.so if available and enable device placement logs.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidate_paths = [
+        os.environ.get("MUSA_PLUGIN_PATH"),
+        os.path.join(script_dir, "libmusa_plugin.so"),
+        os.path.join(
+            script_dir, "..", "tensorflow_musa_extension", "build", "libmusa_plugin.so"
+        ),
+        "/workspace/tensorflow_musa/build/libmusa_plugin.so",
+    ]
+
+    plugin_loaded = False
+    for candidate in candidate_paths:
+        if not candidate:
+            continue
+        plugin_path = os.path.abspath(candidate)
+        if os.path.isfile(plugin_path):
+            try:
+                tf.load_library(plugin_path)
+                print(f"[MUSA] plugin loaded: {plugin_path}")
+                plugin_loaded = True
+                break
+            except Exception as e:
+                print(f"[MUSA] failed to load plugin {plugin_path}: {e}")
+
+    if not plugin_loaded:
+        print("[MUSA] libmusa_plugin.so not found; run will continue without plugin.")
+        print("[MUSA] set MUSA_PLUGIN_PATH=/abs/path/libmusa_plugin.so to force a path.")
+
+    tf.config.set_soft_device_placement(True)
+    tf.debugging.set_log_device_placement(True)
+    print("[MUSA] tf.config.set_soft_device_placement(True)")
+    print("[MUSA] tf.debugging.set_log_device_placement(True)")
 
 
 def infer_placeholder_shape_from_usage(graph_def, placeholder_name):
@@ -283,6 +322,7 @@ def main():
 
     try:
         # 1. 加载图并获取 placeholder 信息
+        configure_musa_runtime()
         graph_def, placeholders = load_graph_and_get_placeholders(model_path)
 
         if not placeholders:
